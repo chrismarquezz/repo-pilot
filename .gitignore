@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+
+node_modules/
+__pycache__/
+.pytest_cache/
+chroma_data/
+dist/
+build/
+.venv/
+venv/
+
+*.pyc
+.DS_Store
+vite.config.ts.timestamp*
