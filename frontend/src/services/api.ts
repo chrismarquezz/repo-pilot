@@ -32,4 +32,8 @@ export async function uploadRepo(githubUrl: string): Promise<UploadResponse> {
   return res.data;
 }
 
+export async function deleteRepo(repoId: string): Promise<void> {
+  await api.delete(`/api/repos/${repoId}`);
+}
+
 export { API_URL };

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { fetchRepos, uploadRepo } from "./services/api";
+import { fetchRepos, uploadRepo, deleteRepo } from "./services/api";
 import type { Repo } from "./services/api";
 import ChatInterface from "./components/ChatInterface";
+import RepoItem from "./components/RepoItem";
 
 export default function App() {
   const [repos, setRepos] = useState<Repo[]>([]);
@@ -9,6 +10,8 @@ export default function App() {
   const [githubUrl, setGithubUrl] = useState("");
   const [indexing, setIndexing] = useState(false);
   const [indexError, setIndexError] = useState<string | null>(null);
+  // Frontend-only display names (keyed by repo_id)
+  const [displayNames, setDisplayNames] = useState<Record<string, string>>({});
 
   const loadRepos = async () => {
     try {
@@ -16,6 +19,27 @@ export default function App() {
       setRepos(data);
     } catch {
       // silently fail on initial load
+    }
+  };
+
+  const handleRename = (repoId: string, newName: string) => {
+    setDisplayNames((prev) => ({ ...prev, [repoId]: newName }));
+  };
+
+  const handleDelete = async (repoId: string) => {
+    try {
+      await deleteRepo(repoId);
+      setRepos((prev) => prev.filter((r) => r.repo_id !== repoId));
+      if (selectedRepo?.repo_id === repoId) {
+        setSelectedRepo(null);
+      }
+      setDisplayNames((prev) => {
+        const next = { ...prev };
+        delete next[repoId];
+        return next;
+      });
+    } catch {
+      // ignore delete errors
     }
   };
 
@@ -104,23 +128,15 @@ export default function App() {
           ) : (
             <ul>
               {repos.map((repo) => (
-                <li key={repo.repo_id}>
-                  <button
-                    onClick={() => setSelectedRepo(repo)}
-                    className={`w-full text-left px-4 py-3 border-b border-gray-700/30 hover:bg-[#161b22] transition-colors ${
-                      selectedRepo?.repo_id === repo.repo_id
-                        ? "bg-[#161b22] border-l-2 border-l-blue-500"
-                        : ""
-                    }`}
-                  >
-                    <p className="text-sm font-medium text-white truncate">
-                      {repo.name}
-                    </p>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      {repo.files} files &middot; {repo.chunks} chunks
-                    </p>
-                  </button>
-                </li>
+                <RepoItem
+                  key={repo.repo_id}
+                  repo={repo}
+                  isSelected={selectedRepo?.repo_id === repo.repo_id}
+                  displayName={displayNames[repo.repo_id] || repo.name}
+                  onSelect={() => setSelectedRepo(repo)}
+                  onRename={(name) => handleRename(repo.repo_id, name)}
+                  onDelete={() => handleDelete(repo.repo_id)}
+                />
               ))}
             </ul>
           )}
