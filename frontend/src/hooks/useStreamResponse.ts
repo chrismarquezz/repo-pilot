@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { API_URL } from "../services/api";
 
 export interface SourceChunk {
@@ -9,23 +9,28 @@ export interface SourceChunk {
   score: number;
 }
 
-interface StreamState {
+export interface StreamResult {
+  text: string;
   sources: SourceChunk[];
-  streamedText: string;
-  isStreaming: boolean;
-  error: string | null;
 }
 
 export function useStreamResponse() {
-  const [state, setState] = useState<StreamState>({
-    sources: [],
-    streamedText: "",
-    isStreaming: false,
-    error: null,
-  });
+  const [streamedText, setStreamedText] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const query = useCallback(async (repoId: string, question: string) => {
-    setState({ sources: [], streamedText: "", isStreaming: true, error: null });
+  // Sources stored in a ref, NOT React state — avoids batching issues entirely
+  const sourcesRef = useRef<SourceChunk[]>([]);
+
+  const query = useCallback(async (repoId: string, question: string): Promise<StreamResult | null> => {
+    setStreamedText("");
+    setIsStreaming(true);
+    setError(null);
+    sourcesRef.current = [];
+
+    // Plain JS variables — guaranteed available when the stream ends
+    let finalSources: SourceChunk[] = [];
+    let finalText = "";
 
     try {
       const res = await fetch(`${API_URL}/api/query`, {
@@ -36,18 +41,16 @@ export function useStreamResponse() {
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
-        setState((s) => ({
-          ...s,
-          isStreaming: false,
-          error: err.detail || "Request failed",
-        }));
-        return;
+        setIsStreaming(false);
+        setError(err.detail || "Request failed");
+        return null;
       }
 
       const reader = res.body?.getReader();
       if (!reader) {
-        setState((s) => ({ ...s, isStreaming: false, error: "No response stream" }));
-        return;
+        setIsStreaming(false);
+        setError("No response stream");
+        return null;
       }
 
       const decoder = new TextDecoder();
@@ -59,42 +62,39 @@ export function useStreamResponse() {
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
-        // Keep the last potentially incomplete line in the buffer
         buffer = lines.pop() || "";
 
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
-          const json = line.slice(6).trim();
-          if (!json) continue;
+          const jsonStr = line.slice(6).trim();
+          if (!jsonStr) continue;
 
           try {
-            const event = JSON.parse(json);
+            const event = JSON.parse(jsonStr);
 
             if (event.type === "sources") {
-              setState((s) => ({ ...s, sources: event.chunks }));
+              finalSources = event.chunks;
+              sourcesRef.current = event.chunks;
             } else if (event.type === "token") {
-              setState((s) => ({
-                ...s,
-                streamedText: s.streamedText + event.content,
-              }));
+              finalText += event.content;
+              setStreamedText((prev) => prev + event.content);
             } else if (event.type === "error") {
-              setState((s) => ({ ...s, error: event.message }));
+              setError(event.message);
             }
-            // "done" — we just let the loop finish
           } catch {
-            // skip malformed JSON lines
+            // skip malformed SSE lines
           }
         }
       }
+
+      return { text: finalText, sources: finalSources };
     } catch (err) {
-      setState((s) => ({
-        ...s,
-        error: err instanceof Error ? err.message : "Unknown error",
-      }));
+      setError(err instanceof Error ? err.message : "Unknown error");
+      return null;
     } finally {
-      setState((s) => ({ ...s, isStreaming: false }));
+      setIsStreaming(false);
     }
   }, []);
 
-  return { ...state, query };
+  return { sourcesRef, streamedText, isStreaming, error, query };
 }

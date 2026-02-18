@@ -2,11 +2,12 @@ import { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import toast from "react-hot-toast";
 import type { Repo } from "../services/api";
 import { useStreamResponse } from "../hooks/useStreamResponse";
 import type { SourceChunk } from "../hooks/useStreamResponse";
 
-interface Message {
+export interface Message {
   role: "user" | "assistant";
   content: string;
   sources?: SourceChunk[];
@@ -15,13 +16,16 @@ interface Message {
 interface Props {
   repo: Repo;
   displayName: string;
+  messages: Message[];
+  onMessagesChange: (messages: Message[]) => void;
 }
 
-export default function ChatInterface({ repo, displayName }: Props) {
-  const [messages, setMessages] = useState<Message[]>([]);
+export default function ChatInterface({ repo, displayName, messages, onMessagesChange }: Props) {
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
-  const { sources, streamedText, isStreaming, error, query } =
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const { sourcesRef, streamedText, isStreaming, error, query } =
     useStreamResponse();
 
   // Auto-scroll on new content
@@ -29,38 +33,49 @@ export default function ChatInterface({ repo, displayName }: Props) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamedText]);
 
-  // When streaming finishes, commit the assistant message
+  // Show toast on query error
   useEffect(() => {
-    if (!isStreaming && streamedText) {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: streamedText, sources },
-      ]);
+    if (error) {
+      const msg = error.includes("429") ? "Rate limit exceeded. Try again later." : error;
+      toast.error(msg);
     }
-    // Only trigger when streaming stops
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isStreaming]);
-
-  // Reset messages when switching repos
-  useEffect(() => {
-    setMessages([]);
-  }, [repo.repo_id]);
+  }, [error]);
 
   const handleSend = async () => {
     const q = input.trim();
     if (!q || isStreaming) return;
 
     setInput("");
-    setMessages((prev) => [...prev, { role: "user", content: q }]);
-    await query(repo.repo_id, q);
+    const updatedMessages: Message[] = [...messages, { role: "user", content: q }];
+    onMessagesChange(updatedMessages);
+
+    const result = await query(repo.repo_id, q);
+    if (result && result.text) {
+      onMessagesChange([
+        ...messagesRef.current,
+        { role: "assistant", content: result.text, sources: result.sources },
+      ]);
+    }
   };
 
   const handleClearChat = () => {
     if (messages.length === 0) return;
     if (window.confirm("Clear all messages for this chat?")) {
-      setMessages([]);
+      onMessagesChange([]);
     }
   };
+
+  // Ctrl+L / Cmd+L clears chat
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "l" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        handleClearChat();
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  });
 
   return (
     <div className="flex flex-col h-full">
@@ -105,10 +120,10 @@ export default function ChatInterface({ repo, displayName }: Props) {
         {isStreaming && (
           <div className="flex justify-start">
             <div className="max-w-[80%]">
-              {sources.length > 0 && <SourceCards sources={sources} />}
+              {sourcesRef.current.length > 0 && <SourceCards sources={sourcesRef.current} />}
               <div className="rounded-lg bg-[#161b22] border border-gray-700/50 px-4 py-3 text-sm">
                 {streamedText ? (
-                  <div className="prose prose-invert prose-sm max-w-none">
+                  <div className="max-w-none text-gray-200">
                     <ReactMarkdown components={markdownComponents}>{streamedText}</ReactMarkdown>
                   </div>
                 ) : (
@@ -132,15 +147,21 @@ export default function ChatInterface({ repo, displayName }: Props) {
 
       {/* Input */}
       <div className="px-5 py-3 border-t border-gray-700/50 flex-shrink-0">
-        <div className="flex gap-2">
-          <input
-            type="text"
+        <div className="flex gap-2 items-end">
+          <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSend()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
             placeholder="Ask about this codebase..."
             disabled={isStreaming}
-            className="flex-1 rounded-md bg-[#161b22] border border-gray-700 px-4 py-2 text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500 disabled:opacity-50"
+            rows={1}
+            className="flex-1 rounded-md bg-[#161b22] border border-gray-700 px-4 py-2 text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500 disabled:opacity-50 resize-none max-h-32 overflow-y-auto"
+            style={{ fieldSizing: "content" } as React.CSSProperties}
           />
           <button
             onClick={handleSend}
@@ -162,6 +183,43 @@ export default function ChatInterface({ repo, displayName }: Props) {
   );
 }
 
+/* ---------- Copy button for code blocks ---------- */
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      className="px-1.5 py-0.5 rounded text-[0.6875rem] font-medium text-gray-500 hover:text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity"
+    >
+      {copied ? "Copied!" : "Copy"}
+    </button>
+  );
+}
+
+/* ---------- Language display names ---------- */
+
+const LANG_LABELS: Record<string, string> = {
+  js: "JavaScript", javascript: "JavaScript",
+  ts: "TypeScript", typescript: "TypeScript",
+  tsx: "TSX", jsx: "JSX",
+  py: "Python", python: "Python",
+  java: "Java", go: "Go", rs: "Rust", rust: "Rust",
+  cpp: "C++", c: "C", rb: "Ruby", ruby: "Ruby",
+  sh: "Shell", bash: "Bash", zsh: "Shell",
+  yml: "YAML", yaml: "YAML", json: "JSON",
+  md: "Markdown", markdown: "Markdown",
+  css: "CSS", html: "HTML", sql: "SQL",
+  text: "Text",
+};
+
 /* ---------- Markdown code block components ---------- */
 
 const markdownComponents = {
@@ -171,31 +229,73 @@ const markdownComponents = {
 
     // Block code (has language class or contains newlines)
     if (match || codeString.includes("\n")) {
+      const lang = match?.[1] || "text";
+      const label = LANG_LABELS[lang] || lang;
       return (
-        <SyntaxHighlighter
-          style={oneDark}
-          language={match?.[1] || "text"}
-          PreTag="div"
-          customStyle={{
-            margin: 0,
-            borderRadius: "0.375rem",
-            fontSize: "0.8125rem",
-          }}
-        >
-          {codeString}
-        </SyntaxHighlighter>
+        <div className="relative group my-3 rounded-lg border border-gray-700/50 overflow-hidden">
+          <div className="flex items-center justify-between px-3 py-1.5 bg-[#1c2128] border-b border-gray-700/40">
+            <span className="text-[0.6875rem] text-gray-500 font-mono">{label}</span>
+            <CopyButton text={codeString} />
+          </div>
+          <SyntaxHighlighter
+            style={oneDark}
+            language={lang}
+            PreTag="div"
+            customStyle={{
+              margin: 0,
+              borderRadius: 0,
+              fontSize: "0.8125rem",
+              padding: "0.75rem 1rem",
+            }}
+          >
+            {codeString}
+          </SyntaxHighlighter>
+        </div>
       );
     }
 
     // Inline code
     return (
       <code
-        className="rounded bg-[#1c2128] px-1.5 py-0.5 text-[0.8125rem] font-mono text-gray-300"
+        className="rounded bg-[#1c2128] border border-gray-700/40 px-1.5 py-0.5 text-[0.8125rem] font-mono text-blue-300"
         {...props}
       >
         {children}
       </code>
     );
+  },
+  p({ children }: React.ComponentProps<"p">) {
+    return <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>;
+  },
+  h1({ children }: React.ComponentProps<"h1">) {
+    return <h1 className="text-lg font-semibold text-white mt-4 mb-2 first:mt-0">{children}</h1>;
+  },
+  h2({ children }: React.ComponentProps<"h2">) {
+    return <h2 className="text-base font-semibold text-white mt-4 mb-2 first:mt-0">{children}</h2>;
+  },
+  h3({ children }: React.ComponentProps<"h3">) {
+    return <h3 className="text-sm font-semibold text-white mt-3 mb-1.5 first:mt-0">{children}</h3>;
+  },
+  ul({ children }: React.ComponentProps<"ul">) {
+    return <ul className="mb-3 last:mb-0 pl-5 space-y-1.5 list-disc marker:text-gray-600">{children}</ul>;
+  },
+  ol({ children }: React.ComponentProps<"ol">) {
+    return <ol className="mb-3 last:mb-0 pl-5 space-y-1.5 list-decimal marker:text-gray-500">{children}</ol>;
+  },
+  li({ children }: React.ComponentProps<"li">) {
+    return <li className="leading-relaxed">{children}</li>;
+  },
+  blockquote({ children }: React.ComponentProps<"blockquote">) {
+    return <blockquote className="border-l-2 border-gray-600 pl-3 my-3 text-gray-400 italic">{children}</blockquote>;
+  },
+  hr() {
+    return <hr className="border-gray-700/50 my-4" />;
+  },
+  a({ children, href }: React.ComponentProps<"a">) {
+    return <a href={href} className="text-blue-400 hover:text-blue-300 underline underline-offset-2" target="_blank" rel="noopener noreferrer">{children}</a>;
+  },
+  strong({ children }: React.ComponentProps<"strong">) {
+    return <strong className="font-semibold text-white">{children}</strong>;
   },
 };
 
@@ -219,7 +319,7 @@ function MessageBubble({ message }: { message: Message }) {
           {isUser ? (
             message.content
           ) : (
-            <div className="prose prose-invert prose-sm max-w-none">
+            <div className="max-w-none text-gray-200">
               <ReactMarkdown components={markdownComponents}>{message.content}</ReactMarkdown>
             </div>
           )}
@@ -272,22 +372,25 @@ function SourceCards({ sources }: { sources: SourceChunk[] }) {
               L{s.start_line}-{s.end_line}
             </span>
           </button>
-          {expanded[i] && s.content && (
+          {expanded[i] && (
             <div className="border-t border-gray-700/30 max-h-60 overflow-auto">
-              <SyntaxHighlighter
-                style={oneDark}
-                language={detectLanguage(s.filename)}
-                showLineNumbers
-                startingLineNumber={s.start_line}
-                customStyle={{
-                  margin: 0,
-                  borderRadius: 0,
-                  fontSize: "0.75rem",
-                  background: "transparent",
-                }}
-              >
-                {s.content}
-              </SyntaxHighlighter>
+              {s.content ? (
+                <SyntaxHighlighter
+                  style={oneDark}
+                  language={detectLanguage(s.filename)}
+                  showLineNumbers
+                  startingLineNumber={s.start_line}
+                  customStyle={{
+                    margin: 0,
+                    borderRadius: 0,
+                    fontSize: "0.75rem",
+                  }}
+                >
+                  {s.content}
+                </SyntaxHighlighter>
+              ) : (
+                <p className="px-3 py-2 text-xs text-gray-500 italic">No content available</p>
+              )}
             </div>
           )}
         </div>

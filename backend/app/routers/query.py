@@ -81,7 +81,7 @@ async def _sse_generator(question: str, chunks: list[dict]):
             "filename": c["filename"],
             "start_line": c["start_line"],
             "end_line": c["end_line"],
-            "content": c["content"],
+            "content": c.get("content", ""),
             "score": c["score"],
         }
         for c in chunks
