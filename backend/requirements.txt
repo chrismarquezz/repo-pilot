@@ -4,6 +4,7 @@ chromadb
 openai
 anthropic
 python-dotenv
+slowapi
 pytest
 pytest-asyncio
 httpx

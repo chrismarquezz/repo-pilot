@@ -3,10 +3,11 @@
 import logging
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from app.services.github import clone_repo, cleanup_repo
+from app.limiter import limiter
 from app.services.chunker import chunk_repository
 from app.services.embedder import embed_texts
 from app.services.vectorstore import store_chunks
@@ -29,7 +30,8 @@ class UploadResponse(BaseModel):
 
 
 @router.post("/upload", response_model=UploadResponse)
-async def upload_repo(body: UploadRequest):
+@limiter.limit("5/hour")
+async def upload_repo(request: Request, body: UploadRequest):
     """Clone a GitHub repo, chunk its code, embed, and store in ChromaDB.
 
     Full pipeline: clone → chunk → embed → store → cleanup.

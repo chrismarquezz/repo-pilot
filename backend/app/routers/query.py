@@ -3,10 +3,11 @@
 import json
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from app.limiter import limiter
 from app.services.embedder import embed_texts
 from app.services.vectorstore import query_chunks, repo_exists
 from app.services.llm import stream_response
@@ -22,7 +23,8 @@ class QueryRequest(BaseModel):
 
 
 @router.post("/query")
-async def query_repo(body: QueryRequest):
+@limiter.limit("30/hour")
+async def query_repo(request: Request, body: QueryRequest):
     """Embed the question, retrieve relevant chunks, and stream Claude's answer.
 
     Returns a Server-Sent Events stream:
@@ -73,12 +75,13 @@ async def query_repo(body: QueryRequest):
 
 async def _sse_generator(question: str, chunks: list[dict]):
     """Yield SSE-formatted events: sources, tokens, done."""
-    # First event: source chunks (without full content, just metadata)
+    # First event: source chunks with content for collapsible display
     sources = [
         {
             "filename": c["filename"],
             "start_line": c["start_line"],
             "end_line": c["end_line"],
+            "content": c["content"],
             "score": c["score"],
         }
         for c in chunks

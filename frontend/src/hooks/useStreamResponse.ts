@@ -5,6 +5,7 @@ export interface SourceChunk {
   filename: string;
   start_line: number;
   end_line: number;
+  content: string;
   score: number;
 }
 
