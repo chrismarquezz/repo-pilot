@@ -1,8 +1,19 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Toaster } from "react-hot-toast";
+import toast from "react-hot-toast";
 import { fetchRepos, uploadRepo, deleteRepo } from "./services/api";
 import type { Repo } from "./services/api";
 import ChatInterface from "./components/ChatInterface";
+import type { Message } from "./components/ChatInterface";
+import { AnimatePresence, motion } from "framer-motion";
 import RepoItem from "./components/RepoItem";
+
+const INDEXING_STEPS = [
+  { key: "cloning", message: "Cloning repository..." },
+  { key: "chunking", message: "Chunking code files..." },
+  { key: "embedding", message: "Generating embeddings..." },
+  { key: "storing", message: "Storing vectors..." },
+];
 
 export default function App() {
   const [repos, setRepos] = useState<Repo[]>([]);
@@ -10,15 +21,18 @@ export default function App() {
   const [githubUrl, setGithubUrl] = useState("");
   const [indexing, setIndexing] = useState(false);
   const [indexError, setIndexError] = useState<string | null>(null);
+  const [activeStepIndex, setActiveStepIndex] = useState(-1);
   const [displayNames, setDisplayNames] = useState<Record<string, string>>({});
+  const [chatHistory, setChatHistory] = useState<Record<string, Message[]>>({});
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const stepTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadRepos = async () => {
     try {
       const data = await fetchRepos();
       setRepos(data);
     } catch {
-      // silently fail on initial load
+      toast.error("Failed to load repositories");
     }
   };
 
@@ -38,8 +52,14 @@ export default function App() {
         delete next[repoId];
         return next;
       });
+      setChatHistory((prev) => {
+        const next = { ...prev };
+        delete next[repoId];
+        return next;
+      });
+      toast.success("Repository deleted");
     } catch {
-      // ignore delete errors
+      toast.error("Failed to delete repository");
     }
   };
 
@@ -47,30 +67,95 @@ export default function App() {
     loadRepos();
   }, []);
 
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => {
+      if (stepTimerRef.current) clearInterval(stepTimerRef.current);
+    };
+  }, []);
+
+  const startStepAnimation = () => {
+    setActiveStepIndex(0);
+    let step = 0;
+    stepTimerRef.current = setInterval(() => {
+      step += 1;
+      if (step < INDEXING_STEPS.length) {
+        setActiveStepIndex(step);
+      } else {
+        // Stay on last step — the actual completion will clear it
+        if (stepTimerRef.current) clearInterval(stepTimerRef.current);
+        stepTimerRef.current = null;
+      }
+    }, 3000);
+  };
+
+  const stopStepAnimation = () => {
+    if (stepTimerRef.current) {
+      clearInterval(stepTimerRef.current);
+      stepTimerRef.current = null;
+    }
+    // Mark all steps done briefly, then clear
+    setActiveStepIndex(INDEXING_STEPS.length);
+    setTimeout(() => setActiveStepIndex(-1), 1500);
+  };
+
   const handleIndex = async () => {
     if (!githubUrl.trim()) return;
     setIndexing(true);
     setIndexError(null);
+    startStepAnimation();
+
     try {
       await uploadRepo(githubUrl.trim());
       setGithubUrl("");
       await loadRepos();
+      toast.success("Repository indexed successfully");
     } catch (err: unknown) {
       const msg =
         err instanceof Error ? err.message : "Indexing failed";
       setIndexError(msg);
+      toast.error(msg.includes("429") ? "Rate limit exceeded. Try again later." : msg);
     } finally {
       setIndexing(false);
+      stopStepAnimation();
     }
   };
 
   const handleSelectRepo = (repo: Repo) => {
     setSelectedRepo(repo);
-    setSidebarOpen(false); // close sidebar on mobile after selection
+    setSidebarOpen(false);
   };
+
+  // Dynamic page title
+  useEffect(() => {
+    if (selectedRepo) {
+      const name = displayNames[selectedRepo.repo_id] || selectedRepo.name;
+      document.title = `RepoPilot — ${name}`;
+    } else {
+      document.title = "RepoPilot — Chat with any codebase";
+    }
+  }, [selectedRepo, displayNames]);
 
   return (
     <div className="flex h-screen bg-[#0d1117] text-gray-200">
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          duration: 4000,
+          style: {
+            background: "#1c2128",
+            color: "#e6edf3",
+            border: "1px solid rgba(55, 65, 81, 0.5)",
+            fontSize: "0.875rem",
+          },
+          success: {
+            iconTheme: { primary: "#22c55e", secondary: "#1c2128" },
+          },
+          error: {
+            iconTheme: { primary: "#ef4444", secondary: "#1c2128" },
+          },
+        }}
+      />
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
@@ -89,7 +174,6 @@ export default function App() {
         <div className="p-4 border-b border-gray-700/50">
           <div className="flex items-center justify-between mb-3">
             <h1 className="text-lg font-semibold text-white">RepoPilot</h1>
-            {/* Close button on mobile */}
             <button
               onClick={() => setSidebarOpen(false)}
               className="p-1 rounded hover:bg-gray-700/50 md:hidden"
@@ -122,14 +206,34 @@ export default function App() {
           )}
         </div>
 
-        {/* Indexing spinner */}
-        {indexing && (
-          <div className="flex items-center gap-2.5 px-4 py-3 border-b border-gray-700/50 bg-[#161b22]/50">
-            <svg className="animate-spin h-4 w-4 text-blue-400 flex-shrink-0" viewBox="0 0 24 24" fill="none">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
-            <span className="text-sm text-gray-400">Indexing repository...</span>
+        {/* Indexing progress steps */}
+        {activeStepIndex >= 0 && (
+          <div className="px-4 py-3 border-b border-gray-700/50 bg-[#161b22]/50 space-y-2">
+            {INDEXING_STEPS.map((s, i) => {
+              const isDone = i < activeStepIndex;
+              const isActive = i === activeStepIndex;
+              const isPending = i > activeStepIndex;
+
+              if (isPending) return null;
+
+              return (
+                <div key={s.key} className="flex items-center gap-2.5">
+                  {isDone ? (
+                    <svg className="w-4 h-4 text-green-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : isActive ? (
+                    <svg className="animate-spin h-4 w-4 text-blue-400 flex-shrink-0" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                  ) : null}
+                  <span className={`text-xs ${isDone ? "text-gray-500" : "text-gray-300"}`}>
+                    {s.message}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -145,17 +249,26 @@ export default function App() {
             </div>
           ) : (
             <ul>
-              {repos.map((repo) => (
-                <RepoItem
-                  key={repo.repo_id}
-                  repo={repo}
-                  isSelected={selectedRepo?.repo_id === repo.repo_id}
-                  displayName={displayNames[repo.repo_id] || repo.name}
-                  onSelect={() => handleSelectRepo(repo)}
-                  onRename={(name) => handleRename(repo.repo_id, name)}
-                  onDelete={() => handleDelete(repo.repo_id)}
-                />
-              ))}
+              <AnimatePresence initial={false}>
+                {repos.map((repo) => (
+                  <motion.div
+                    key={repo.repo_id}
+                    initial={{ opacity: 0, y: -20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, height: 0, overflow: "hidden" }}
+                    transition={{ duration: 0.25 }}
+                  >
+                    <RepoItem
+                      repo={repo}
+                      isSelected={selectedRepo?.repo_id === repo.repo_id}
+                      displayName={displayNames[repo.repo_id] || repo.name}
+                      onSelect={() => handleSelectRepo(repo)}
+                      onRename={(name) => handleRename(repo.repo_id, name)}
+                      onDelete={() => handleDelete(repo.repo_id)}
+                    />
+                  </motion.div>
+                ))}
+              </AnimatePresence>
             </ul>
           )}
         </div>
@@ -179,7 +292,14 @@ export default function App() {
         </div>
 
         {selectedRepo ? (
-          <ChatInterface repo={selectedRepo} displayName={displayNames[selectedRepo.repo_id] || selectedRepo.name} />
+          <ChatInterface
+            repo={selectedRepo}
+            displayName={displayNames[selectedRepo.repo_id] || selectedRepo.name}
+            messages={chatHistory[selectedRepo.repo_id] || []}
+            onMessagesChange={(msgs) =>
+              setChatHistory((prev) => ({ ...prev, [selectedRepo.repo_id]: msgs }))
+            }
+          />
         ) : (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center text-gray-500">
