@@ -20,6 +20,12 @@ def _get_collection(repo_id: str) -> chromadb.Collection:
     )
 
 
+def repo_exists(repo_id: str) -> bool:
+    """Check whether a collection for the given repo_id exists in ChromaDB."""
+    existing = {col.name for col in _client.list_collections()}
+    return repo_id in existing
+
+
 def store_chunks(
     repo_id: str,
     chunks: list[dict],

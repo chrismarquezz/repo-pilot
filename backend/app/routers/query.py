@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.services.embedder import embed_texts
-from app.services.vectorstore import query_chunks
+from app.services.vectorstore import query_chunks, repo_exists
 from app.services.llm import stream_response
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,14 @@ async def query_repo(body: QueryRequest):
         2. {"type": "token", "content": "..."} (repeated)
         3. {"type": "done"}
     """
-    # 1. Embed the question
+    # 1. Check repo exists before doing any work
+    if not repo_exists(body.repo_id):
+        raise HTTPException(
+            status_code=404,
+            detail="Repository not found",
+        )
+
+    # 2. Embed the question
     try:
         embeddings = await embed_texts([body.question])
     except RuntimeError as e:
@@ -38,20 +45,19 @@ async def query_repo(body: QueryRequest):
 
     query_embedding = embeddings[0]
 
-    # 2. Retrieve relevant chunks
+    # 3. Retrieve relevant chunks
     try:
         chunks = query_chunks(body.repo_id, query_embedding, top_k=8)
     except Exception as e:
-        # ChromaDB raises ValueError / generic errors for missing collections
         raise HTTPException(
-            status_code=404,
-            detail=f"Repository '{body.repo_id}' not found.",
+            status_code=502,
+            detail=f"Vector store error: {e}",
         ) from e
 
     if not chunks:
         raise HTTPException(
             status_code=404,
-            detail=f"No indexed chunks found for repo '{body.repo_id}'.",
+            detail="Repository not found",
         )
 
     # 3. Stream the response as SSE

@@ -46,6 +46,7 @@ async def test_query_returns_sse_stream(client, monkeypatch):
         yield "Hello "
         yield "world"
 
+    monkeypatch.setattr("app.routers.query.repo_exists", lambda repo_id: True)
     monkeypatch.setattr("app.routers.query.embed_texts", mock_embed)
     monkeypatch.setattr("app.routers.query.query_chunks", mock_query)
     monkeypatch.setattr("app.routers.query.stream_response", mock_stream)
