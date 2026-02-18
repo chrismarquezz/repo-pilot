@@ -174,12 +174,12 @@ export default function App() {
             </svg>
           </button>
           <span className="text-sm font-medium text-white truncate">
-            {selectedRepo ? selectedRepo.name : "RepoPilot"}
+            {selectedRepo ? (displayNames[selectedRepo.repo_id] || selectedRepo.name) : "RepoPilot"}
           </span>
         </div>
 
         {selectedRepo ? (
-          <ChatInterface repo={selectedRepo} />
+          <ChatInterface repo={selectedRepo} displayName={displayNames[selectedRepo.repo_id] || selectedRepo.name} />
         ) : (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center text-gray-500">

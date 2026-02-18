@@ -14,9 +14,10 @@ interface Message {
 
 interface Props {
   repo: Repo;
+  displayName: string;
 }
 
-export default function ChatInterface({ repo }: Props) {
+export default function ChatInterface({ repo, displayName }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -66,7 +67,7 @@ export default function ChatInterface({ repo }: Props) {
       {/* Header */}
       <div className="px-5 py-3 border-b border-gray-700/50 flex-shrink-0 flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-white">{repo.name}</h2>
+          <h2 className="text-sm font-semibold text-white">{displayName}</h2>
           <p className="text-xs text-gray-500">
             {repo.files} files &middot; {repo.chunks} chunks
           </p>
