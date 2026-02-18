@@ -7,23 +7,23 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)
 
-> 🚀 **Live Demo: [repo-pilot-black.vercel.app](https://repo-pilot-black.vercel.app)**
+> **Live Demo: [repo-pilot-black.vercel.app](https://repo-pilot-black.vercel.app)**
 
 RepoPilot lets you index any public GitHub repository and ask natural language questions about its code. It uses retrieval-augmented generation (RAG) to find the most relevant code chunks via semantic search, then streams context-grounded answers powered by Claude. Every answer includes source references with expandable code snippets so you can verify the context yourself.
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Frontend | React 19 + TypeScript + Tailwind CSS |
-| Backend | Python 3.11 / FastAPI |
-| Vector DB | ChromaDB (local, file-persisted) |
-| Embeddings | OpenAI `text-embedding-3-small` |
-| LLM | Anthropic Claude (claude-sonnet-4-20250514) |
-| Rate Limiting | SlowAPI (IP-based) |
-| Testing | Pytest + GitHub Actions CI |
-| Containerization | Docker |
-| Deployment | Vercel (frontend) + Render (backend) |
+| Layer            | Technology                                  |
+| ---------------- | ------------------------------------------- |
+| Frontend         | React 19 + TypeScript + Tailwind CSS        |
+| Backend          | Python 3.11 / FastAPI                       |
+| Vector DB        | ChromaDB (local, file-persisted)            |
+| Embeddings       | OpenAI `text-embedding-3-small`             |
+| LLM              | Anthropic Claude (claude-sonnet-4-20250514) |
+| Rate Limiting    | SlowAPI (IP-based)                          |
+| Testing          | Pytest + GitHub Actions CI                  |
+| Containerization | Docker                                      |
+| Deployment       | Vercel (frontend) + Render (backend)        |
 
 ## Architecture
 
@@ -110,7 +110,13 @@ List all indexed repositories.
 // Response
 {
   "repos": [
-    { "repo_id": "repo-a1b2c3d4", "name": "repo", "files": 42, "chunks": 156, "indexed_at": "2025-01-15T..." }
+    {
+      "repo_id": "repo-a1b2c3d4",
+      "name": "repo",
+      "files": 42,
+      "chunks": 156,
+      "indexed_at": "2025-01-15T..."
+    }
   ]
 }
 ```
