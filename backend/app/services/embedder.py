@@ -9,7 +9,7 @@ from app.config import OPENAI_API_KEY
 logger = logging.getLogger(__name__)
 
 EMBEDDING_MODEL = "text-embedding-3-small"
-MAX_BATCH_SIZE = 2048  # OpenAI limit per request
+MAX_BATCH_SIZE = 100  # Keep batches well under OpenAI's 300k token/request limit
 MAX_TOKEN_ESTIMATE = 8000  # text-embedding-3-small limit is 8192 tokens
 MAX_CHARS = MAX_TOKEN_ESTIMATE * 3  # ~3 chars per token conservative estimate
 
@@ -19,7 +19,7 @@ _client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 async def embed_texts(texts: list[str]) -> list[list[float]]:
     """Generate embeddings for a list of text strings.
 
-    Automatically batches requests to stay within OpenAI's 2048-per-request
+    Automatically batches requests to stay within OpenAI's token-per-request
     limit. Returns vectors in the same order as the input texts.
 
     Args:
@@ -47,7 +47,7 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
 
 
 async def _embed_batch(texts: list[str]) -> list[list[float]]:
-    """Embed a single batch (≤2048 texts).
+    """Embed a single batch (≤100 texts).
 
     Retries once on rate-limit errors with a short backoff.
     """

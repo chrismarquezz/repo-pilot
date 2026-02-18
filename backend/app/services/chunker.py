@@ -16,8 +16,11 @@ from pathlib import Path
 SKIP_DIRS = {
     "node_modules", ".git", "__pycache__", "venv", ".venv", "env",
     ".env", ".tox", ".mypy_cache", ".pytest_cache", "dist", "build",
-    ".next", ".nuxt", "coverage", ".idea", ".vscode",
+    ".next", ".nuxt", "coverage", ".idea", ".vscode", "out",
 }
+
+MAX_FILE_SIZE = 500 * 1024  # 500 KB — skip anything larger
+MINIFIED_LINE_THRESHOLD = 10_000  # single line over this → likely minified
 
 SKIP_FILES = {
     "package-lock.json", "yarn.lock", "poetry.lock", "pnpm-lock.yaml",
@@ -140,6 +143,10 @@ def chunk_repository(repo_path: str, repo_id: str) -> list[dict]:
         if not lines:
             continue
 
+        # Skip minified files (single line over 10k chars)
+        if any(len(line) > MINIFIED_LINE_THRESHOLD for line in lines[:3]):
+            continue
+
         file_chunks = _chunk_file(lines, language)
 
         # Safety net: re-split any chunk that exceeds MAX_CHUNK_CHARS
@@ -176,10 +183,21 @@ def _iter_code_files(root: Path):
                 continue
             if fname.endswith(".min.js") or fname.endswith(".min.css"):
                 continue
+            if fname.endswith(".map"):
+                continue
 
             fpath = Path(dirpath) / fname
-            if fpath.suffix in ALLOWED_EXTENSIONS:
-                yield fpath
+            if fpath.suffix not in ALLOWED_EXTENSIONS:
+                continue
+
+            # Skip files over 500 KB
+            try:
+                if fpath.stat().st_size > MAX_FILE_SIZE:
+                    continue
+            except OSError:
+                continue
+
+            yield fpath
 
 
 def _chunk_file(
